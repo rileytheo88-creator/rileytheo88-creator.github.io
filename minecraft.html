@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minecraft - Flat World</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+canvas { display: block; }
+
+#blocker {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.7); display: flex; align-items: center;
+  justify-content: center; z-index: 100; cursor: pointer;
+}
+#instructions {
+  text-align: center; color: #fff; max-width: 500px; padding: 40px;
+}
+#instructions h1 {
+  font-size: 48px; margin-bottom: 10px; color: #5a5;
+  text-shadow: 3px 3px 0 #000; letter-spacing: 2px;
+}
+#instructions h2 {
+  font-size: 18px; margin-bottom: 30px; color: #aaa;
+}
+#instructions .controls {
+  text-align: left; background: rgba(255,255,255,0.05);
+  border-radius: 10px; padding: 20px; margin-top: 20px;
+}
+#instructions .controls p {
+  margin: 6px 0; font-size: 14px; color: #ccc;
+}
+#instructions .controls span {
+  display: inline-block; background: #333; border: 1px solid #555;
+  border-radius: 4px; padding: 2px 8px; font-size: 12px;
+  margin-right: 8px; min-width: 30px; text-align: center; color: #fff;
+}
+#instructions .click-text {
+  font-size: 22px; color: #5a5; margin-top: 20px;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100%{opacity:0.6} 50%{opacity:1} }
+
+#crosshair {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 50; pointer-events: none; display: none;
+}
+#crosshair::before, #crosshair::after {
+  content: ''; position: absolute; background: rgba(255,255,255,0.8);
+}
+#crosshair::before { width: 2px; height: 20px; left: -1px; top: -10px; }
+#crosshair::after { width: 20px; height: 2px; left: -10px; top: -1px; }
+
+#hotbar {
+  position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+  display: none; z-index: 50; background: rgba(0,0,0,0.6);
+  border: 2px solid #555; border-radius: 4px; padding: 2px;
+}
+#hotbar .slot {
+  display: inline-block; width: 50px; height: 50px; margin: 2px;
+  border: 2px solid #333; background: rgba(0,0,0,0.4); position: relative;
+  vertical-align: top; border-radius: 2px;
+}
+#hotbar .slot.active { border-color: #fff; }
+#hotbar .slot canvas { width: 100%; height: 100%; }
+#hotbar .slot .label {
+  position: absolute; bottom: 1px; left: 0; right: 0;
+  font-size: 8px; color: #fff; text-align: center;
+  text-shadow: 1px 1px 0 #000;
+}
+#hotbar .slot .num {
+  position: absolute; top: 1px; left: 4px;
+  font-size: 10px; color: #ddd; text-shadow: 1px 1px 0 #000;
+}
+
+#info {
+  position: fixed; top: 10px; left: 10px; color: #fff;
+  font-size: 12px; z-index: 50; display: none;
+  text-shadow: 1px 1px 0 #000; line-height: 1.6;
+}
+</style>
+</head>
+<body>
+
+<div id="blocker">
+  <div id="instructions">
+    <h1>&#9618; MINECRAFT</h1>
+    <h2>Flat World Edition</h2>
+    <div class="controls">
+      <p><span>W</span><span>A</span><span>S</span><span>D</span> Move around</p>
+      <p><span>Space</span> Jump</p>
+      <p><span>Mouse</span> Look around</p>
+      <p><span>Left Click</span> Break block</p>
+      <p><span>Right Click</span> Place block</p>
+      <p><span>1-7</span> Select block type</p>
+      <p><span>Scroll</span> Cycle blocks</p>
+    </div>
+    <p class="click-text">Click to Play</p>
+  </div>
+</div>
+
+<div id="crosshair"></div>
+<div id="hotbar"></div>
+<div id="info"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.min.js"></script>
+<script>
+(function() {
+
+var WORLD_SIZE = 32;
+var BLOCK_SIZE = 1;
+var GRAVITY = 25;
+var JUMP_FORCE = 9;
+var MOVE_SPEED = 5;
+var PLAYER_HEIGHT = 1.7;
+var PLAYER_WIDTH = 0.3;
+var REACH_DISTANCE = 6;
+
+var BLOCKS = { AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, OAK_LOG: 4, OAK_PLANKS: 5, COBBLESTONE: 6, SAND: 7 };
+var BLOCK_NAMES = { 1: "Grass", 2: "Dirt", 3: "Stone", 4: "Oak Log", 5: "Planks", 6: "Cobble", 7: "Sand" };
+var BLOCK_COLORS = {
+  1: { top: "#4a8c2a", side: "#6b5340", bottom: "#6b5340" },
+  2: { top: "#6b5340", side: "#6b5340", bottom: "#6b5340" },
+  3: { top: "#808080", side: "#808080", bottom: "#808080" },
+  4: { top: "#8B6914", side: "#6B4226", bottom: "#8B6914" },
+  5: { top: "#C4A46C", side: "#C4A46C", bottom: "#C4A46C" },
+  6: { top: "#7a7a7a", side: "#7a7a7a", bottom: "#7a7a7a" },
+  7: { top: "#e8d5a3", side: "#e8d5a3", bottom: "#e8d5a3" }
+};
+
+function createBlockTexture(color, type) {
+  var canvas = document.createElement("canvas");
+  canvas.width = 16; canvas.height = 16;
+  var ctx = canvas.getContext("2d");
+  var base = new THREE.Color(color);
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, 16, 16);
+  for (var x = 0; x < 16; x++) {
+    for (var y = 0; y < 16; y++) {
+      var r = (Math.random() - 0.5) * 0.12;
+      var c = base.clone();
+      c.r = Math.max(0, Math.min(1, c.r + r));
+      c.g = Math.max(0, Math.min(1, c.g + r));
+      c.b = Math.max(0, Math.min(1, c.b + r));
+      ctx.fillStyle = "rgb(" + (c.r*255|0) + "," + (c.g*255|0) + "," + (c.b*255|0) + ")";
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  if (type === "grass_top") {
+    for (var i = 0; i < 30; i++) {
+      ctx.fillStyle = "rgba(30,100,10," + (0.15 + Math.random() * 0.15) + ")";
+      ctx.fillRect(Math.random() * 16 | 0, Math.random() * 16 | 0, 1, 1);
+    }
+  } else if (type === "grass_side") {
+    for (var sx = 0; sx < 16; sx++) {
+      for (var sy = 0; sy < 3; sy++) {
+        ctx.fillStyle = "rgba(60," + (130 + Math.random()*30|0) + ",30," + (0.7 + Math.random()*0.15) + ")";
+        ctx.fillRect(sx, sy, 1, 1);
+      }
+    }
+  } else if (type === "log_side") {
+    for (var ly = 0; ly < 16; ly += 4) { ctx.fillStyle = "rgba(0,0,0,0.08)"; ctx.fillRect(0, ly, 16, 1); }
+  } else if (type === "cobble") {
+    for (var ci = 0; ci < 8; ci++) {
+      ctx.strokeStyle = "rgba(0,0,0,0.15)";
+      ctx.strokeRect(Math.random()*12|0, Math.random()*12|0, 2+(Math.random()*4|0), 2+(Math.random()*4|0));
+    }
+  } else if (type === "planks") {
+    for (var py = 0; py < 16; py += 4) { ctx.fillStyle = "rgba(0,0,0,0.06)"; ctx.fillRect(0, py, 16, 1); }
+    ctx.fillStyle = "rgba(0,0,0,0.04)"; ctx.fillRect(8, 0, 1, 16);
+  }
+  var texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function getBlockMaterials(blockType) {
+  var colors = BLOCK_COLORS[blockType];
+  if (!colors) return null;
+  var topType = "default", sideType = "default", bottomType = "default";
+  if (blockType === BLOCKS.GRASS) { topType = "grass_top"; sideType = "grass_side"; }
+  if (blockType === BLOCKS.OAK_LOG) { sideType = "log_side"; }
+  if (blockType === BLOCKS.COBBLESTONE) { topType = "cobble"; sideType = "cobble"; bottomType = "cobble"; }
+  if (blockType === BLOCKS.OAK_PLANKS) { topType = "planks"; sideType = "planks"; bottomType = "planks"; }
+  return [
+    new THREE.MeshLambertMaterial({ map: createBlockTexture(colors.side, sideType) }),
+    new THREE.MeshLambertMaterial({ map: createBlockTexture(colors.side, sideType) }),
+    new THREE.MeshLambertMaterial({ map: createBlockTexture(colors.top, topType) }),
+    new THREE.MeshLambertMaterial({ map: createBlockTexture(colors.bottom, bottomType) }),
+    new THREE.MeshLambertMaterial({ map: createBlockTexture(colors.side, sideType) }),
+    new THREE.MeshLambertMaterial({ map: createBlockTexture(colors.side, sideType) })
+  ];
+}
+
+var worldData = {};
+function blockKey(x, y, z) { return x + "," + y + "," + z; }
+function getBlock(x, y, z) { return worldData[blockKey(x, y, z)] || BLOCKS.AIR; }
+function setBlock(x, y, z, type) {
+  if (type === BLOCKS.AIR) delete worldData[blockKey(x, y, z)];
+  else worldData[blockKey(x, y, z)] = type;
+}
+
+var scene = new THREE.Scene();
+var skyCanvas = document.createElement("canvas");
+skyCanvas.width = 1; skyCanvas.height = 256;
+var skyCtx = skyCanvas.getContext("2d");
+var skyGrad = skyCtx.createLinearGradient(0, 0, 0, 256);
+skyGrad.addColorStop(0, "#1a6fc4");
+skyGrad.addColorStop(0.4, "#4a9fe8");
+skyGrad.addColorStop(0.7, "#87ceeb");
+skyGrad.addColorStop(1, "#b0dff5");
+skyCtx.fillStyle = skyGrad;
+skyCtx.fillRect(0, 0, 1, 256);
+var skyTexture = new THREE.CanvasTexture(skyCanvas);
+skyTexture.magFilter = THREE.LinearFilter;
+scene.background = skyTexture;
+scene.fog = new THREE.Fog(0x87ceeb, 40, 90);
+
+var camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
+var renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xccddff, 0.6));
+var sunLight = new THREE.DirectionalLight(0xfff5e0, 1.2);
+sunLight.position.set(30, 50, 20);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.width = 2048;
+sunLight.shadow.mapSize.height = 2048;
+sunLight.shadow.camera.near = 0.5;
+sunLight.shadow.camera.far = 120;
+sunLight.shadow.camera.left = -40;
+sunLight.shadow.camera.right = 40;
+sunLight.shadow.camera.top = 40;
+sunLight.shadow.camera.bottom = -40;
+sunLight.shadow.bias = -0.001;
+scene.add(sunLight);
+scene.add(new THREE.HemisphereLight(0x87ceeb, 0x556633, 0.3));
+
+var blockGeometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+var blockMeshes = {};
+var materialCache = {};
+
+function getMaterialsForBlock(type) {
+  if (!materialCache[type]) materialCache[type] = getBlockMaterials(type);
+  return materialCache[type];
+}
+
+function addBlockMesh(x, y, z, type) {
+  var key = blockKey(x, y, z);
+  if (blockMeshes[key]) scene.remove(blockMeshes[key]);
+  var materials = getMaterialsForBlock(type);
+  if (!materials) return;
+  var mesh = new THREE.Mesh(blockGeometry, materials);
+  mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.userData = { bx: x, by: y, bz: z };
+  scene.add(mesh);
+  blockMeshes[key] = mesh;
+}
+
+function removeBlockMesh(x, y, z) {
+  var key = blockKey(x, y, z);
+  if (blockMeshes[key]) { scene.remove(blockMeshes[key]); delete blockMeshes[key]; }
+}
+
+var GROUND_LEVEL = 4;
+for (var wx = -WORLD_SIZE; wx < WORLD_SIZE; wx++) {
+  for (var wz = -WORLD_SIZE; wz < WORLD_SIZE; wz++) {
+    setBlock(wx, 0, wz, BLOCKS.STONE);
+    for (var wy = 1; wy < GROUND_LEVEL; wy++) setBlock(wx, wy, wz, BLOCKS.DIRT);
+    setBlock(wx, GROUND_LEVEL, wz, BLOCKS.GRASS);
+  }
+}
+
+function isExposed(x, y, z) {
+  return getBlock(x-1,y,z)===0||getBlock(x+1,y,z)===0||getBlock(x,y-1,z)===0||getBlock(x,y+1,z)===0||getBlock(x,y,z-1)===0||getBlock(x,y,z+1)===0;
+}
+
+function rebuildVisibleBlocks() {
+  var key;
+  for (key in blockMeshes) scene.remove(blockMeshes[key]);
+  blockMeshes = {};
+  for (key in worldData) {
+    var parts = key.split(",");
+    var x = parseInt(parts[0]), y = parseInt(parts[1]), z = parseInt(parts[2]);
+    if (isExposed(x, y, z)) addBlockMesh(x, y, z, worldData[key]);
+  }
+}
+rebuildVisibleBlocks();
+
+var cloudGroup = new THREE.Group();
+scene.add(cloudGroup);
+function createCloud(x, y, z) {
+  var cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
+  var cloud = new THREE.Group();
+  for (var i = 0; i < 5 + (Math.random()*8|0); i++) {
+    var size = 1.5 + Math.random() * 2;
+    var m = new THREE.Mesh(new THREE.BoxGeometry(size, size*0.4, size*0.8), cloudMat);
+    m.position.set((Math.random()-0.5)*6, (Math.random()-0.5)*1.5, (Math.random()-0.5)*4);
+    cloud.add(m);
+  }
+  cloud.position.set(x, y, z);
+  return cloud;
+}
+for (var ci = 0; ci < 20; ci++) {
+  cloudGroup.add(createCloud((Math.random()-0.5)*120, 30+Math.random()*10, (Math.random()-0.5)*120));
+}
+
+var player = {
+  position: new THREE.Vector3(0, GROUND_LEVEL + 2, 0),
+  velocity: new THREE.Vector3(0, 0, 0),
+  onGround: false, yaw: 0, pitch: 0
+};
+camera.position.copy(player.position);
+
+var blocker = document.getElementById("blocker");
+var crosshair = document.getElementById("crosshair");
+var hotbar = document.getElementById("hotbar");
+var info = document.getElementById("info");
+var isLocked = false;
+
+blocker.addEventListener("click", function() { renderer.domElement.requestPointerLock(); });
+document.addEventListener("pointerlockchange", function() {
+  isLocked = document.pointerLockElement === renderer.domElement;
+  blocker.style.display = isLocked ? "none" : "flex";
+  crosshair.style.display = isLocked ? "block" : "none";
+  hotbar.style.display = isLocked ? "flex" : "none";
+  info.style.display = isLocked ? "block" : "none";
+});
+document.addEventListener("mousemove", function(e) {
+  if (!isLocked) return;
+  player.yaw -= e.movementX * 0.002;
+  player.pitch -= e.movementY * 0.002;
+  player.pitch = Math.max(-Math.PI/2+0.01, Math.min(Math.PI/2-0.01, player.pitch));
+});
+
+var keys = {};
+document.addEventListener("keydown", function(e) { keys[e.code] = true; });
+document.addEventListener("keyup", function(e) { keys[e.code] = false; });
+
+var selectedSlot = 0;
+var hotbarBlocks = [BLOCKS.GRASS, BLOCKS.DIRT, BLOCKS.STONE, BLOCKS.OAK_LOG, BLOCKS.OAK_PLANKS, BLOCKS.COBBLESTONE, BLOCKS.SAND];
+
+function buildHotbar() {
+  hotbar.innerHTML = "";
+  for (var i = 0; i < hotbarBlocks.length; i++) {
+    var type = hotbarBlocks[i];
+    var slot = document.createElement("div");
+    slot.className = "slot" + (i === selectedSlot ? " active" : "");
+    var miniCanvas = document.createElement("canvas");
+    miniCanvas.width = 64; miniCanvas.height = 64;
+    var miniRenderer = new THREE.WebGLRenderer({ canvas: miniCanvas, alpha: true, antialias: true });
+    miniRenderer.setSize(64, 64);
+    var miniScene = new THREE.Scene();
+    var miniCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 10);
+    miniCamera.position.set(1.3, 1.1, 1.3);
+    miniCamera.lookAt(0, 0, 0);
+    miniScene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    var miniDir = new THREE.DirectionalLight(0xffffff, 0.6);
+    miniDir.position.set(1, 2, 1);
+    miniScene.add(miniDir);
+    miniScene.add(new THREE.Mesh(blockGeometry, getMaterialsForBlock(type)));
+    miniRenderer.render(miniScene, miniCamera);
+    miniRenderer.dispose();
+    slot.appendChild(miniCanvas);
+    var label = document.createElement("div");
+    label.className = "label"; label.textContent = BLOCK_NAMES[type];
+    slot.appendChild(label);
+    var num = document.createElement("div");
+    num.className = "num"; num.textContent = (i+1).toString();
+    slot.appendChild(num);
+    hotbar.appendChild(slot);
+  }
+}
+buildHotbar();
+
+document.addEventListener("keydown", function(e) {
+  var n = parseInt(e.key);
+  if (n >= 1 && n <= 7) { selectedSlot = n - 1; buildHotbar(); }
+});
+document.addEventListener("wheel", function(e) {
+  if (!isLocked) return;
+  if (e.deltaY > 0) selectedSlot = (selectedSlot + 1) % hotbarBlocks.length;
+  else selectedSlot = (selectedSlot - 1 + hotbarBlocks.length) % hotbarBlocks.length;
+  buildHotbar();
+});
+
+var raycaster = new THREE.Raycaster();
+raycaster.far = REACH_DISTANCE;
+
+function getTargetBlock() {
+  var dir = new THREE.Vector3(0, 0, -1);
+  dir.applyQuaternion(camera.quaternion);
+  raycaster.set(camera.position, dir);
+  var meshes = [];
+  for (var key in blockMeshes) meshes.push(blockMeshes[key]);
+  var intersects = raycaster.intersectObjects(meshes);
+  if (intersects.length > 0) {
+    var hit = intersects[0];
+    var pos = hit.object.userData;
+    var normal = hit.face.normal;
+    return {
+      block: { x: pos.bx, y: pos.by, z: pos.bz },
+      placeAt: { x: pos.bx+Math.round(normal.x), y: pos.by+Math.round(normal.y), z: pos.bz+Math.round(normal.z) },
+      mesh: hit.object
+    };
+  }
+  return null;
+}
+
+var highlightMesh = new THREE.Mesh(
+  new THREE.BoxGeometry(1.005, 1.005, 1.005),
+  new THREE.MeshBasicMaterial({ color: 0x000000, wireframe: true, transparent: true, opacity: 0.4 })
+);
+highlightMesh.visible = false;
+scene.add(highlightMesh);
+
+var breakingBlock = null, breakProgress = 0, BREAK_TIME = 0.4, isMouseDown = false;
+var breakOverlayMat = new THREE.MeshBasicMaterial({
+  color: 0xffffff, transparent: true, opacity: 0, depthTest: true, polygonOffset: true, polygonOffsetFactor: -1
+});
+var breakOverlayMesh = new THREE.Mesh(new THREE.BoxGeometry(1.01, 1.01, 1.01), breakOverlayMat);
+breakOverlayMesh.visible = false;
+scene.add(breakOverlayMesh);
+
+document.addEventListener("mousedown", function(e) {
+  if (!isLocked) return;
+  if (e.button === 0) {
+    isMouseDown = true;
+    var target = getTargetBlock();
+    if (target) { breakingBlock = target.block; breakProgress = 0; }
+  }
+  if (e.button === 2) {
+    var target2 = getTargetBlock();
+    if (target2) {
+      var p = target2.placeAt;
+      var px = Math.floor(player.position.x), py = Math.floor(player.position.y), pz = Math.floor(player.position.z);
+      var pyFeet = Math.floor(player.position.y - PLAYER_HEIGHT + 0.1);
+      if (p.x === px && p.z === pz && (p.y === py || p.y === pyFeet)) return;
+      if (getBlock(p.x, p.y, p.z) === BLOCKS.AIR) {
+        var bt = hotbarBlocks[selectedSlot];
+        setBlock(p.x, p.y, p.z, bt);
+        addBlockMesh(p.x, p.y, p.z, bt);
+      }
+    }
+  }
+});
+document.addEventListener("mouseup", function(e) {
+  if (e.button === 0) { isMouseDown = false; breakingBlock = null; breakProgress = 0; breakOverlayMesh.visible = false; }
+});
+document.addEventListener("contextmenu", function(e) { e.preventDefault(); });
+
+function collidesAt(x, y, z) {
+  var hw = PLAYER_WIDTH;
+  var corners = [[x-hw,z-hw],[x+hw,z-hw],[x-hw,z+hw],[x+hw,z+hw]];
+  for (var i = 0; i < corners.length; i++) {
+    var bx = Math.floor(corners[i][0]), bz = Math.floor(corners[i][1]);
+    for (var by = Math.floor(y-PLAYER_HEIGHT+0.01); by <= Math.floor(y); by++) {
+      if (getBlock(bx, by, bz) !== BLOCKS.AIR) return true;
+    }
+  }
+  return false;
+}
+
+function isOnGround(x, y, z) {
+  var hw = PLAYER_WIDTH, feetY = y - PLAYER_HEIGHT;
+  var corners = [[x-hw,z-hw],[x+hw,z-hw],[x-hw,z+hw],[x+hw,z+hw]];
+  for (var i = 0; i < corners.length; i++) {
+    if (getBlock(Math.floor(corners[i][0]), Math.floor(feetY-0.01), Math.floor(corners[i][1])) !== BLOCKS.AIR) return true;
+  }
+  return false;
+}
+
+var particles = [];
+var particleGeo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+
+function spawnBreakParticles(x, y, z, bt) {
+  var colors = BLOCK_COLORS[bt];
+  if (!colors) return;
+  for (var i = 0; i < 12; i++) {
+    var mat = new THREE.MeshBasicMaterial({ color: colors.top });
+    var p = new THREE.Mesh(particleGeo, mat);
+    p.position.set(x+0.5+(Math.random()-0.5)*0.8, y+0.5+(Math.random()-0.5)*0.8, z+0.5+(Math.random()-0.5)*0.8);
+    p.userData.velocity = new THREE.Vector3((Math.random()-0.5)*4, Math.random()*5+2, (Math.random()-0.5)*4);
+    p.userData.life = 0.6 + Math.random() * 0.4;
+    scene.add(p); particles.push(p);
+  }
+}
+
+function updateParticles(dt) {
+  for (var i = particles.length-1; i >= 0; i--) {
+    var p = particles[i];
+    p.userData.velocity.y -= GRAVITY * dt;
+    p.position.add(p.userData.velocity.clone().multiplyScalar(dt));
+    p.userData.life -= dt;
+    p.material.opacity = Math.max(0, p.userData.life);
+    p.material.transparent = true;
+    if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
+  }
+}
+
+var sunMesh = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffee88 }));
+sunMesh.position.set(60, 80, -40);
+scene.add(sunMesh);
+
+var lastTime = performance.now(), fps = 0, frameCount = 0, fpsTime = 0;
+
+function update() {
+  requestAnimationFrame(update);
+  var now = performance.now();
+  var dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+  frameCount++; fpsTime += dt;
+  if (fpsTime >= 0.5) { fps = Math.round(frameCount / fpsTime); frameCount = 0; fpsTime = 0; }
+  if (!isLocked) { renderer.render(scene, camera); return; }
+
+  camera.quaternion.setFromEuler(new THREE.Euler(player.pitch, player.yaw, 0, "YXZ"));
+  var forward = new THREE.Vector3(0, 0, -1);
+  forward.applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, player.yaw, 0, "YXZ")));
+  var right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
+  var moveDir = new THREE.Vector3(0, 0, 0);
+  if (keys["KeyW"]) moveDir.add(forward);
+  if (keys["KeyS"]) moveDir.sub(forward);
+  if (keys["KeyA"]) moveDir.sub(right);
+  if (keys["KeyD"]) moveDir.add(right);
+  if (moveDir.length() > 0) moveDir.normalize();
+
+  var newX = player.position.x + moveDir.x * MOVE_SPEED * dt;
+  var newZ = player.position.z + moveDir.z * MOVE_SPEED * dt;
+  if (!collidesAt(newX, player.position.y, player.position.z)) player.position.x = newX;
+  if (!collidesAt(player.position.x, player.position.y, newZ)) player.position.z = newZ;
+
+  player.onGround = isOnGround(player.position.x, player.position.y, player.position.z);
+  if (player.onGround && keys["Space"]) { player.velocity.y = JUMP_FORCE; player.onGround = false; }
+  if (!player.onGround) { player.velocity.y -= GRAVITY * dt; }
+  else if (player.velocity.y < 0) {
+    player.velocity.y = 0;
+    player.position.y = Math.floor(player.position.y - PLAYER_HEIGHT) + 1 + PLAYER_HEIGHT;
+  }
+
+  var newY = player.position.y + player.velocity.y * dt;
+  if (!collidesAt(player.position.x, newY, player.position.z)) { player.position.y = newY; }
+  else {
+    if (player.velocity.y > 0) player.velocity.y = 0;
+    else { player.velocity.y = 0; player.position.y = Math.floor(player.position.y - PLAYER_HEIGHT) + 1 + PLAYER_HEIGHT; }
+  }
+
+  if (player.position.y < -10) { player.position.set(0, GROUND_LEVEL + 3, 0); player.velocity.set(0, 0, 0); }
+  camera.position.copy(player.position);
+
+  var target = getTargetBlock();
+  if (target) { highlightMesh.position.set(target.block.x+0.5, target.block.y+0.5, target.block.z+0.5); highlightMesh.visible = true; }
+  else highlightMesh.visible = false;
+
+  if (isMouseDown && breakingBlock) {
+    var ct = getTargetBlock();
+    if (ct && ct.block.x===breakingBlock.x && ct.block.y===breakingBlock.y && ct.block.z===breakingBlock.z) {
+      breakProgress += dt;
+      breakOverlayMesh.position.set(breakingBlock.x+0.5, breakingBlock.y+0.5, breakingBlock.z+0.5);
+      breakOverlayMesh.visible = true;
+      breakOverlayMat.opacity = (breakProgress / BREAK_TIME) * 0.5;
+      if (breakProgress >= BREAK_TIME) {
+        var bbt = getBlock(breakingBlock.x, breakingBlock.y, breakingBlock.z);
+        spawnBreakParticles(breakingBlock.x, breakingBlock.y, breakingBlock.z, bbt);
+        setBlock(breakingBlock.x, breakingBlock.y, breakingBlock.z, BLOCKS.AIR);
+        removeBlockMesh(breakingBlock.x, breakingBlock.y, breakingBlock.z);
+        var dirs = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+        for (var di = 0; di < dirs.length; di++) {
+          var nx=breakingBlock.x+dirs[di][0], ny=breakingBlock.y+dirs[di][1], nz=breakingBlock.z+dirs[di][2];
+          var nt = getBlock(nx, ny, nz);
+          if (nt !== BLOCKS.AIR && !blockMeshes[blockKey(nx,ny,nz)]) addBlockMesh(nx, ny, nz, nt);
+        }
+        breakingBlock = null; breakProgress = 0; breakOverlayMesh.visible = false;
+      }
+    } else { breakingBlock = ct ? ct.block : null; breakProgress = 0; breakOverlayMesh.visible = false; }
+  }
+
+  for (var ci2 = 0; ci2 < cloudGroup.children.length; ci2++) {
+    cloudGroup.children[ci2].position.x += dt * 0.5;
+    if (cloudGroup.children[ci2].position.x > 70) cloudGroup.children[ci2].position.x = -70;
+  }
+  updateParticles(dt);
+  sunLight.position.set(player.position.x+30, 50, player.position.z+20);
+  sunLight.target.position.copy(player.position);
+  sunLight.target.updateMatrixWorld();
+
+  info.innerHTML = "<b>Minecraft Flat World</b><br>FPS: "+fps+"<br>XYZ: "+player.position.x.toFixed(1)+" / "+player.position.y.toFixed(1)+" / "+player.position.z.toFixed(1)+"<br>Block: "+BLOCK_NAMES[hotbarBlocks[selectedSlot]];
+  renderer.render(scene, camera);
+}
+
+window.addEventListener("resize", function() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+update();
+})();
+</script>
+</body>
+</html>
